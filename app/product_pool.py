@@ -7,13 +7,20 @@ Layout (matches the original tool's 产品池 folder):
                            (stored using the same EasyBoss header format so
                            it round-trips back through the reader)
     把产品池表格放这里.txt
+
+Thread safety (v1.0+): the module-level `_operation_lock` serializes
+add/load operations, and `_is_generating` is exposed so the GUI can disable
+buttons during in-flight work. Although the Tk Worker bridge already
+prevents concurrent submissions, the lock guards against future callers
+(e.g. CLI batch tools, plug-ins).
 """
 from __future__ import annotations
 
 import json
 import re
+import threading
 import time
-from dataclasses import dataclass
+from dataclasses import dataclass, field
 from pathlib import Path
 from typing import Any, Callable
 
@@ -24,6 +31,22 @@ from .converter import LogFn
 
 
 ProgressFn = Callable[[float, str], None]
+
+
+# Module-level concurrency control (v1.0+)
+_operation_lock = threading.Lock()
+_is_generating: bool = False
+
+
+def is_generating() -> bool:
+    """Return True if add_to_pool / load_pool is currently running.
+
+    Use this from the GUI to disable pool-related buttons while a pool
+    operation is in flight (or queue new requests).  Although the Tk
+    Worker bridge rejects concurrent submissions already, this gives
+    callers (e.g. a future CLI) a thread-safe way to introspect state.
+    """
+    return _is_generating
 
 
 META_FILENAME = "_pools_meta.json"
@@ -42,6 +65,7 @@ class PoolInfo:
     count: int          # product count (cached in meta)
     updated: str        # last update timestamp
     source_format: str  # "easyboss" (round-trip) or "tiktok"
+    is_generating: bool = False  # True while an add/load op is in flight
 
     def to_dict(self) -> dict[str, Any]:
         return {
@@ -50,6 +74,7 @@ class PoolInfo:
             "count": self.count,
             "updated": self.updated,
             "source_format": self.source_format,
+            "is_generating": self.is_generating,
         }
 
     @classmethod
@@ -60,6 +85,7 @@ class PoolInfo:
             count=int(d.get("count", 0) or 0),
             updated=d.get("updated", ""),
             source_format=d.get("source_format", "easyboss"),
+            is_generating=bool(d.get("is_generating", False)),
         )
 
 
@@ -172,46 +198,58 @@ def add_to_pool(
     progress: ProgressFn | None = None,
     log: LogFn | None = None,
     column_mapping: dict[str, str] | None = None,
-    site: str = "PH",
+    site: str = "TH",
 ) -> PoolInfo:
-    """入池: read source xlsx, group into Products, append to the named pool xlsx."""
-    if log:
-        log(f"[pool] 入池「{pool_name}」←{source_xlsx.name}")
-    _ensure_pool_dir(pool_dir)
-    products = read_source(source_xlsx, column_mapping=column_mapping)
-    if not products:
-        raise ValueError("源表格中没有可识别的产品数据。")
-    if progress:
-        progress(0.2, f"已识别 {len(products)} 个产品，准备入池…")
-    if log:
-        log(f"[pool] 识别到 {len(products)} 个产品")
+    """入池: read source xlsx, group into Products, append to the named pool xlsx.
 
-    fname = _safe_filename(pool_name)
-    pool_path = pool_dir / fname
+    Thread safety: serialized via the module-level lock. ``is_generating()``
+    returns True for the duration of this call (and any concurrent add/load
+    call would block until this one completes).
+    """
+    global _is_generating
+    with _operation_lock:
+        _is_generating = True
+        try:
+            if log:
+                log(f"[pool] 入池「{pool_name}」←{source_xlsx.name}")
+            _ensure_pool_dir(pool_dir)
+            products = read_source(source_xlsx, column_mapping=column_mapping)
+            if not products:
+                raise ValueError("源表格中没有可识别的产品数据。")
+            if progress:
+                progress(0.2, f"已识别 {len(products)} 个产品，准备入池…")
+            if log:
+                log(f"[pool] 识别到 {len(products)} 个产品")
 
-    existing = _load_existing_pool_rows(pool_path)
-    new_rows: list[list[Any]] = []
-    for i, p in enumerate(products, 1):
-        new_rows.extend(_product_to_pool_rows(p, site=site))
-        if progress:
-            progress(0.2 + 0.6 * (i / len(products)), f"已展开 {i}/{len(products)} 个产品…")
+            fname = _safe_filename(pool_name)
+            pool_path = pool_dir / fname
 
-    all_rows = existing + new_rows
-    if progress:
-        progress(0.85, f"正在写入 {pool_path.name}…")
-    _write_pool_xlsx(pool_path, all_rows)
+            existing = _load_existing_pool_rows(pool_path)
+            new_rows: list[list[Any]] = []
+            for i, p in enumerate(products, 1):
+                new_rows.extend(_product_to_pool_rows(p, site=site))
+                if progress:
+                    progress(0.2 + 0.6 * (i / len(products)), f"已展开 {i}/{len(products)} 个产品…")
 
-    info = PoolInfo(
-        name=pool_name.strip() or Path(fname).stem,
-        filename=fname,
-        count=len(all_rows),
-        updated=time.strftime("%Y-%m-%d %H:%M:%S"),
-        source_format="easyboss",
-    )
-    _update_meta_entry(pool_dir, info)
-    if progress:
-        progress(1.0, f"已入池 {len(products)} 个产品到「{pool_name}」，累计 {len(all_rows)} 行。")
-    return info
+            all_rows = existing + new_rows
+            if progress:
+                progress(0.85, f"正在写入 {pool_path.name}…")
+            _write_pool_xlsx(pool_path, all_rows)
+
+            info = PoolInfo(
+                name=pool_name.strip() or Path(fname).stem,
+                filename=fname,
+                count=len(all_rows),
+                updated=time.strftime("%Y-%m-%d %H:%M:%S"),
+                source_format="easyboss",
+                is_generating=False,
+            )
+            _update_meta_entry(pool_dir, info)
+            if progress:
+                progress(1.0, f"已入池 {len(products)} 个产品到「{pool_name}」，累计 {len(all_rows)} 行。")
+            return info
+        finally:
+            _is_generating = False
 
 
 def _write_pool_xlsx(path: Path, rows: list[list[Any]]) -> None:
@@ -263,5 +301,15 @@ def list_pools(pool_dir: Path) -> list[PoolInfo]:
 
 
 def load_pool(pool_path: Path) -> list[Product]:
-    """提取: read a pool xlsx back into Products."""
-    return read_source(pool_path)
+    """提取: read a pool xlsx back into Products.
+
+    Thread safety: serialized via the module-level lock; ``is_generating()``
+    reflects True for the duration of this call.
+    """
+    global _is_generating
+    with _operation_lock:
+        _is_generating = True
+        try:
+            return read_source(pool_path)
+        finally:
+            _is_generating = False
