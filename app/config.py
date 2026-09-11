@@ -45,6 +45,8 @@ def default_config() -> dict[str, Any]:
         "product_xlsx_last_output_dir": "",
         "product_pool_dir": "",
         "product_xlsx_settings": {
+            # v1.0.1: 让用户能跳过图片下载（默认勾上 = 下载；GUI 转化页有开关）
+            "download_images_enabled": True,
             # Title (TH 版：v1.0.1 后台禁用词规避：去 "COD" / 去方括号【…】 /
             # 去特殊符号 ฿，用更中性的泰式写法。卖家如要 COD 字样需手动加。)
             "title_prefix_enabled": True,
