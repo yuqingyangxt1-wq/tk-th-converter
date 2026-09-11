@@ -254,14 +254,19 @@ def _build_row_for_variant(
     # Variant-level values
     var1_name = _translate_var_name(product.var1_name or "颜色")
     var1_value = _clean_str(variant.var1)
+    if not var1_value and settings.get("default_color_enabled"):
+        # v1.0.1: source 颜色列为空时兜底，避免 TikTok 后台
+        # "Please fill in this field" 报错。
+        var1_value = _clean_str(settings.get("default_color_value")) or "As Picture"
     var2_name = _translate_var_name(product.var2_name or "尺码")
 
     if variant.var2:
         var2_value = _clean_str(variant.var2)
     elif settings.get("fill_sizes_enabled"):
-        # Fallback: source has no size; use the standard sizes list
-        std = settings.get("standard_sizes") or "S,M,L,XL,2XL,3XL"
-        var2_value = std
+        # v1.0.1: 改成"按尺码拆成多行"。原版"塞整串"会让 seller_sku 重复
+        # 触发 TikTok 后台 "SKU is not unique"。拆行逻辑在
+        # build_rows_for_product 里做；这里 var2_value 留空。
+        var2_value = ""
     else:
         var2_value = ""
 
@@ -334,6 +339,14 @@ def build_rows_for_product(
     ``apply_suffix_to_first`` defaults to False (i.e. the first copy has a
     clean title and seller_sku). Set True for split-file mode where the
     whole file should carry a single random fingerprint.
+
+    v1.0.1 — ``fill_sizes_enabled``:
+    When a source variant has no size (var2 empty) and fill_sizes_enabled is
+    on, the variant is **expanded into N synthetic variants** (one per size
+    in ``standard_sizes``). Each synthetic variant bakes its size into
+    platform_sku (so seller_sku stays unique) and var2 (so the size value
+    appears in its own row). Previously this case crammed the entire sizes
+    string into a single cell, which TikTok flagged as "SKU is not unique".
     """
     if copy_suffixes is None:
         copies = max(1, int(settings.get("output_copies", 1) or 1))
@@ -343,23 +356,50 @@ def build_rows_for_product(
 
     common = _resolve_common_fields(product, settings)
     rows: list[OutputRow] = []
+    fill_sizes = bool(settings.get("fill_sizes_enabled"))
+    std_sizes_raw = settings.get("standard_sizes") or "S,M,L,XL,2XL,3XL"
+    std_sizes = [s.strip() for s in std_sizes_raw.split(",") if s.strip()]
 
-    if not product.variants:
-        for c_idx in range(copies):
-            rows.append(_build_row_for_variant(
-                product, Variant(), settings, common,
-                copy_idx=c_idx, copy_suffix=copy_suffixes[c_idx],
-                apply_suffix_to_first=apply_suffix_to_first,
-            ))
-        return rows
-
-    for v in product.variants:
+    def _emit(v: Variant) -> None:
         for c_idx in range(copies):
             rows.append(_build_row_for_variant(
                 product, v, settings, common,
                 copy_idx=c_idx, copy_suffix=copy_suffixes[c_idx],
                 apply_suffix_to_first=apply_suffix_to_first,
             ))
+
+    if not product.variants:
+        # Source had no rows for this product: emit a single empty variant
+        # (or one per standard size if fill_sizes_enabled).
+        if fill_sizes and std_sizes:
+            for sz in std_sizes:
+                _emit(Variant(var2=sz))
+        else:
+            _emit(Variant())
+        return rows
+
+    for v in product.variants:
+        if not v.var2 and fill_sizes and std_sizes:
+            # v1.0.1: source variant has no size — expand into one row per
+            # standard size, baking size into platform_sku to keep seller_sku
+            # unique across the expanded rows.
+            base_sku = _clean_str(v.platform_sku) or product.master_sku()
+            for sz in std_sizes:
+                sz = sz.strip()
+                if not sz:
+                    continue
+                v2 = Variant(
+                    platform_sku=f"{base_sku}-{sz}" if base_sku else "",
+                    var1=v.var1,
+                    var2=sz,
+                    var3=v.var3,
+                    price=v.price,
+                    stock=v.stock,
+                    sku_image=v.sku_image,
+                )
+                _emit(v2)
+        else:
+            _emit(v)
     return rows
 
 

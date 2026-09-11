@@ -9,7 +9,7 @@ from typing import Any
 
 
 APP_NAME = "TK泰国表格转化工具"
-__version__ = "1.0.0"  # TH 初版：男装 / ฿ 泰铢默认
+__version__ = "1.0.1"  # v1.0.1: TH 后台禁用词 / fill_sizes 展开 / 默认 Color / size_chart 必传
 
 
 def get_app_dir() -> Path:
@@ -45,30 +45,38 @@ def default_config() -> dict[str, Any]:
         "product_xlsx_last_output_dir": "",
         "product_pool_dir": "",
         "product_xlsx_settings": {
-            # Title (TH 版：泰铢 ฿ 默认)
+            # Title (TH 版：v1.0.1 后台禁用词规避：去 "COD" / 去方括号【…】 /
+            # 去特殊符号 ฿，用更中性的泰式写法。卖家如要 COD 字样需手动加。)
             "title_prefix_enabled": True,
-            "title_prefix": "COD ฿199 Unisex T-shirt【S-3XL】 ",
+            "title_prefix": "เสื้อยืด Oversize ",
             # Brand
             "brand_enabled": True,
             "brand_value": "No brand",
-            # Price (THB ฿)
+            # Price (THB)
             "price_enabled": True,
             "price_value": 199,
             # Quantity
             "quantity_enabled": True,
             "quantity_value": 999,
-            # COD
+            # COD (v1.0.1: 默认改为 N — TH 后台对 "COD" 字样敏感，
+            # 如果 seller 真用 COD 收发货可手动改 Y)
             "cod_enabled": True,
-            "cod_value": "Y",
+            "cod_value": "N",
             # Fill standard sizes S-3XL into property_value_2
+            # v1.0.1: 行为由"塞整串"改为"按尺码拆成多行"，详见 tiktok_writer.build_rows_for_product
             "fill_sizes_enabled": True,
             "standard_sizes": "S,M,L,XL,2XL,3XL",
+            # v1.0.1: 源表 var1 (颜色) 为空时的兜底值，避免 Primary variation value 空
+            # 被 TikTok 后台拒。卖家如想留空可关闭。
+            "default_color_enabled": True,
+            "default_color_value": "As Picture",
             # Random suffix to differentiate copies
             "title_random_suffix_enabled": True,
             "random_suffix_length": 3,
-            # Category (TH 模板 25 个男装类目，默认 T-shirt)
+            # Category (v1.0.1: 用户团队主要做女装，默认切到女装类目；
+            # 25 个男装类目仍可手动切换)
             "category_enabled": True,
-            "category_value": "Men's Tops/T-shirts",
+            "category_value": "Womenswear & Underwear>Women's Tops>Women's T-shirts",
             # Output copies per product (防查重 / 同款多 listing)
             "output_copies": 2,
             # When False (default), output_copies is realized as N in-file
@@ -85,14 +93,11 @@ def default_config() -> dict[str, Any]:
                 "Size: please refer to the size chart image before ordering. "
                 "Shipping: orders ship within 1-2 business days; delivery typically takes 3-8 days."
             ),
-            # Size chart URL (TH repo 的默认 PNG，公网 raw 链接)
-            # 跟 PH 同一张图：通用 Unisex T-Shirt 尺码表（S/M/L/XL/2XL/3XL）。
-            # TH 卖家可以直接用，需要本地化时可在 GUI 里替换。
+            # Size chart URL (v1.0.1: TH 后台不接受 GitHub raw 外链，
+            # 默认留空让卖家在 GUI 里填 TikTok Media Center 拿到的 URL/ID。
+            # 如果卖家要用占位图，可以在 GUI 里粘贴任意 URL。)
             "size_chart_enabled": True,
-            "size_chart_value": (
-                "https://raw.githubusercontent.com/yuqingyangxt1-wq/"
-                "tk-th-converter/main/assets/default_size_chart.png"
-            ),
+            "size_chart_value": "",
             # Parcel
             "parcel_enabled": True,
             "parcel_weight_value": 200,   # grams

@@ -282,15 +282,16 @@ class ConvertSettingsPanel(tk.Frame):
         # kind ∈ {"text", "int"} — selects the widget type for value rows.
         # enabled_key=None means "no checkbox; this row is always-active".
         row_defs: list[tuple[str, str | None, str, str, str]] = [
-            ("title_prefix",       "title_prefix_enabled",          "标题前缀",       "启用后去随机后缀并截断至 245 字符", "text"),
+            ("title_prefix",       "title_prefix_enabled",          "标题前缀",       "v1.0.1: 不要用 COD / 方括号【…】/ ฿，TH 后台禁用", "text"),
             ("brand_value",        "brand_enabled",                 "brand",          "启用后写入到 brand 列", "text"),
             ("price_value",        "price_enabled",                 "price",          "启用后覆盖每行 price", "int"),
             ("quantity_value",     "quantity_enabled",              "quantity",       "启用后覆盖每行 quantity", "int"),
-            ("cod_value",          "cod_enabled",                   "cod",            "启用后写入到 cod 列（Y/N）", "text"),
+            ("cod_value",          "cod_enabled",                   "cod",            "v1.0.1: 默认 N，卖家要 COD 收发货才 Y", "text"),
+            ("default_color_value","default_color_enabled",         "默认 color",     "v1.0.1: 源表颜色空时填这个值（避免 TikTok 拒）", "text"),
             ("title_random",       "title_random_suffix_enabled",   "标题随机后缀",    "启用 + 截断至 N 位小写后缀，同一本尺码禁用相同后缀", "text"),
             ("split_output_files", "split_output_files",            "拆分文件",        "勾选后，每份输出一个独立 xlsx", "text"),
             ("output_copies",      None,                            "每产品输出份数",  "≥2 时启用防查重；<2 即只生成 1 个", "int"),
-            ("size_chart_value",   "size_chart_enabled",            "size chart",     "留空用内置默认尺码图 URL", "text"),
+            ("size_chart_value",   "size_chart_enabled",            "size chart",     "v1.0.1: 必填 TikTok Media Center URL/ID，不能外链", "text"),
         ]
 
         # We keep direct handles to each entry's ttk.Entry widget so that
